@@ -100,7 +100,7 @@ class HivemindRendezvouz:
 
 
 class HivemindBackend(Communication):
-    """✅ STREAMLINED: Optimized HivemindBackend with memory leak fixes"""
+    """✅ STREAMLINED: Optimized HivemindBackend with identity management"""
     
     def __init__(
         self,
@@ -108,11 +108,15 @@ class HivemindBackend(Communication):
         timeout: int = 600,
         disable_caching: bool = False,
         beam_size: int = 1000,
+        identity_path: str | None = None,  # ✅ NEW: Add identity_path parameter
         **kwargs,
     ):
         self.world_size = int(os.environ.get("HIVEMIND_WORLD_SIZE", 1))
         self.timeout = min(timeout, 300)  # ✅ CAP: Max 5 minutes timeout
         self.bootstrap = HivemindRendezvouz.is_bootstrap()
+        
+        # ✅ NEW: Store identity_path
+        self.identity_path = identity_path
         
         # ✅ CRITICAL: Cap beam_size to prevent P2PD explosion  
         self.beam_size = min(beam_size, 10)  # ✅ AGGRESSIVE CAP: Max 10 instead of 2000
@@ -130,7 +134,7 @@ class HivemindBackend(Communication):
         kwargs["cache_locally"] = False
         kwargs["cache_on_store"] = False
 
-        # ✅ STREAMLINED: DHT initialization
+        # ✅ STREAMLINED: DHT initialization with identity support
         try:
             if self.bootstrap:
                 self._init_bootstrap_dht(initial_peers, **kwargs)
@@ -146,6 +150,25 @@ class HivemindBackend(Communication):
         self._cleanup_thread = None
         self._running = True
         self._start_cleanup_thread()
+
+    def _get_identity_kwargs(self):
+        """✅ NEW: Get identity-related kwargs for DHT initialization"""
+        identity_kwargs = {}
+        
+        if self.identity_path:
+            # If identity_path is provided, use it
+            identity_kwargs['identity_path'] = self.identity_path
+        else:
+            # Try to create a consistent identity based on environment
+            org_id = os.environ.get('ORG_ID')
+            if org_id:
+                # Create identity path based on org_id to ensure consistency
+                identity_dir = os.path.expanduser('~/.hivemind_identities')
+                os.makedirs(identity_dir, exist_ok=True)
+                identity_kwargs['identity_path'] = os.path.join(identity_dir, f'identity_{org_id}.pem')
+                print(f"Using identity path: {identity_kwargs['identity_path']}")
+        
+        return identity_kwargs
 
     def _init_memory_management(self):
         """✅ ENHANCED: Memory management with size tracking"""
@@ -180,10 +203,14 @@ class HivemindBackend(Communication):
         return sys.getsizeof(obj)
 
     def _init_bootstrap_dht(self, initial_peers, **kwargs):
-        """✅ STREAMLINED: Bootstrap DHT"""
+        """✅ STREAMLINED: Bootstrap DHT with identity support"""
         # Filter to supported parameters only
-        supported = ['cache_locally', 'cache_on_store', 'listen', 'announce_maddrs']
+        supported = ['cache_locally', 'cache_on_store', 'listen', 'announce_maddrs', 'identity_path']
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in supported}
+        
+        # ✅ NEW: Add identity kwargs
+        identity_kwargs = self._get_identity_kwargs()
+        filtered_kwargs.update(identity_kwargs)
         
         self.dht = DHT(
             start=True,
@@ -191,6 +218,9 @@ class HivemindBackend(Communication):
             initial_peers=initial_peers,
             **filtered_kwargs,
         )
+        
+        # ✅ NEW: Print peer ID for debugging
+        print(f"Bootstrap DHT initialized with peer ID: {self.dht.peer_id}")
         
         try:
             dht_maddrs = self.dht.get_visible_maddrs(latest=True)
@@ -199,7 +229,7 @@ class HivemindBackend(Communication):
             print(f"Bootstrap setup failed: {e}")
 
     def _init_worker_dht(self, initial_peers, **kwargs):
-        """✅ STREAMLINED: Worker DHT"""
+        """✅ STREAMLINED: Worker DHT with identity support"""
         if initial_peers is None:
             try:
                 initial_peers = HivemindRendezvouz.get_initial_peers()
@@ -207,8 +237,12 @@ class HivemindBackend(Communication):
                 initial_peers = []
         
         # Filter to supported parameters only
-        supported = ['cache_locally', 'cache_on_store', 'listen', 'announce_maddrs']
+        supported = ['cache_locally', 'cache_on_store', 'listen', 'announce_maddrs', 'identity_path']
         filtered_kwargs = {k: v for k, v in kwargs.items() if k in supported}
+        
+        # ✅ NEW: Add identity kwargs
+        identity_kwargs = self._get_identity_kwargs()
+        filtered_kwargs.update(identity_kwargs)
         
         self.dht = DHT(
             start=True,
@@ -216,7 +250,11 @@ class HivemindBackend(Communication):
             initial_peers=initial_peers,
             **filtered_kwargs,
         )
+        
+        # ✅ NEW: Print peer ID for debugging
+        print(f"Worker DHT initialized with peer ID: {self.dht.peer_id}")
 
+    # ... [rest of the methods remain the same as in your original code]
     def _start_cleanup_thread(self):
         """✅ ENHANCED: Background cleanup with memory monitoring"""
         def cleanup_worker():
